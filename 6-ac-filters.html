@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freesound API + Tone.js</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="freesound.js" defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
+
+    <style>
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .slider-container {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        #play-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            margin: 10px 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+        }
+
+        .sound-info {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        .duration-slider-container {
+            margin: 20px 0;
+            padding: 10px;
+        }
+
+        #duration-slider {
+            height: 20px;
+            margin: 10px 0;
+        }
+
+        #duration-values {
+            text-align: center;
+            margin: 10px 0;
+        }
+
+        .keyboard-shortcut {
+            display: inline-block;
+            background: #eee;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-right: 10px;
+            font-family: monospace;
+        }
+
+        /* Make noUiSlider more compact */
+        .noUi-horizontal {
+            height: 10px;
+            width: 200px;
+        }
+
+        .noUi-horizontal .noUi-handle {
+            height: 16px;
+            width: 16px;
+            right: -8px;
+            top: -4px;
+        }
+
+        /* Remove the default lines in noUiSlider handle */
+        .noUi-handle:before,
+        .noUi-handle:after {
+            display: none;
+        }
+
+        /* Round the slider edges */
+        .noUi-target {
+            border-radius: 5px;
+            border: none;
+        }
+
+        /* Adjust the span value display */
+        .slider-value {
+            min-width: 80px;
+        }
+
+        #randomize-button {
+            background-color: #9c27b0;
+            color: white;
+            padding: 8px 16px;
+            margin: 10px 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .query-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+
+        #random-word-button {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        .duration-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #random-duration-button {
+            background-color: #ff9800;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        h4 {
+            margin: 15px 0 10px 0;
+            color: #666;
+        }
+
+        .boolean-filters {
+            margin: 10px 0;
+        }
+
+        #search-button {
+            background-color: #4CAF50;
+            color: white;
+            margin-top: 20px;
+            padding: 12px 24px;
+            font-size: 16px;
+        }
+
+        .keyboard-instructions {
+            margin: 20px 0;
+            padding: 10px;
+            background: #e3f2fd;
+            border-radius: 4px;
+            color: #1565c0;
+        }
+
+        #stop-all-button {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            margin: 0 0 10px 0;
+            padding: 10px 20px;
+        }
+
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        #error {
+            color: #f44336;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Freesound API + Tone.js</h1>
+    <div id="controls"></div>
+    <div id="player-controls">
+        <button id="play-button">Play</button>
+    </div>
+    <div id="sound-info"></div>
+
+    <script>
+        let players = new Map();
+        let filterControls = [];
+        let queryInput;
+        let durationSlider;
+        let minDuration = 1;
+        let maxDuration = 30;
+        let currentSounds = [];
+
+        const filters = [
+            // Content-based filters
+            { name: "ac_brightness", label: "Brightness", min: 0, max: 100, group: "content" },
+            { name: "ac_depth", label: "Depth", min: 0, max: 100, group: "content" },
+            { name: "ac_hardness", label: "Hardness", min: 0, max: 100, group: "content" },
+            { name: "ac_roughness", label: "Roughness", min: 0, max: 100, group: "content" },
+            { name: "ac_boominess", label: "Boominess", min: 0, max: 100, group: "content" },
+            { name: "ac_warmth", label: "Warmth", min: 0, max: 100, group: "content" },
+            { name: "ac_sharpness", label: "Sharpness", min: 0, max: 100, group: "content" },
+            // Confidence filters
+            { name: "ac_note_confidence", label: "Note Reliability", min: 0, max: 1, step: 0.01, group: "confidence" },
+            { name: "ac_tempo_confidence", label: "Tempo Reliability", min: 0, max: 1, step: 0.01, group: "confidence" }
+        ];
+
+        const soundWords = [
+            "bang", "swoosh", "crash", "ding", "buzz", "hum", "whir",
+            "beep", "thud", "clang", "ping", "boom", "whoosh", "click",
+            "crackle", "splash", "drip", "wind", "chord", "drone",
+            "footsteps", "water", "nature", "machine", "ambient"
+        ];
+
+        function setup() {
+            noCanvas();
+            let controlsDiv = select("#controls");
+
+            // Initialize Freesound
+            freesound.setToken("Y4LBMrk6uAEG4plz6ivOY38RWV9RQ3aC6ZcHCsAi");
+
+            // 1. Search Query Section
+            createElement("h3", "Search Query").parent(controlsDiv);
+            let queryContainer = createDiv().class("query-container").parent(controlsDiv);
+            queryInput = createInput("").attribute("placeholder", "Type your query here").parent(queryContainer);
+            createButton("Random Word")
+                .id("random-word-button")
+                .mousePressed(setRandomWord)
+                .parent(queryContainer);
+
+            // 2. Duration Range Section
+            let durationDiv = createDiv()
+                .class("duration-slider-container")
+                .parent(controlsDiv);
+            let durationControls = createDiv()
+                .class("duration-controls")
+                .parent(durationDiv);
+            createElement("h3", "Duration Range (seconds)").parent(durationControls);
+            createButton("Random Duration")
+                .id("random-duration-button")
+                .mousePressed(setRandomDuration)
+                .parent(durationControls);
+            createDiv('').id('duration-slider').parent(durationDiv);
+            createDiv('').id('duration-values').parent(durationDiv);
+
+            // Initialize duration slider
+            durationSlider = document.getElementById('duration-slider');
+            noUiSlider.create(durationSlider, {
+                start: [1, 30],
+                connect: true,
+                range: { 'min': 1, 'max': 30 },
+                step: 1
+            });
+
+            durationSlider.noUiSlider.on('update', function (values) {
+                minDuration = Math.round(values[0]);
+                maxDuration = Math.round(values[1]);
+                select('#duration-values').html(`${minDuration}s - ${maxDuration}s`);
+            });
+
+            // 3. Filter Settings Section
+            createElement("h3", "Filter Settings").parent(controlsDiv);
+            createButton("Randomize Filters")
+                .id("randomize-button")
+                .mousePressed(randomizeFilters)
+                .parent(controlsDiv);
+
+            // Content-based filters
+            createElement("h4", "Sound Characteristics").parent(controlsDiv);
+            filters.filter(f => f.group === "content").forEach(filter => createFilterControl(filter, controlsDiv));
+
+            // Confidence filters
+            createElement("h4", "Analysis Confidence").parent(controlsDiv);
+            filters.filter(f => f.group === "confidence").forEach(filter => createFilterControl(filter, controlsDiv));
+
+            // Boolean filters
+            createElement("h4", "Additional Properties").parent(controlsDiv);
+            let booleanFilters = createDiv().class("boolean-filters").parent(controlsDiv);
+            let reverbDiv = createDiv().class("slider-container").parent(booleanFilters);
+            let reverbCheckbox = createCheckbox("Reverb", false).parent(reverbDiv);
+            let singleEventDiv = createDiv().class("slider-container").parent(booleanFilters);
+            let singleEventCheckbox = createCheckbox("Single Event", false).parent(singleEventDiv);
+
+            // Create a container for search button and error
+            let searchContainer = createDiv().parent(controlsDiv);
+
+            // Search button
+            createButton("Find Sounds")
+                .id("search-button")
+                .mousePressed(() => searchFreesound(reverbCheckbox, singleEventCheckbox))
+                .parent(searchContainer);
+
+            // Add error div after search button
+            createDiv().id("error").parent(searchContainer);
+
+            // Add keyboard event listener
+            window.addEventListener('keydown', handleKeyPress);
+        }
+
+        function createFilterControl(filter, parentDiv) {
+            let div = createDiv().class("slider-container").parent(parentDiv);
+            let checkbox = createCheckbox(filter.label, false).parent(div);
+            let sliderDiv = createDiv().id(`${filter.name}-slider`).parent(div);
+            let span = createSpan(` ${filter.min} - ${filter.max}`).class('slider-value').parent(div);
+
+            noUiSlider.create(sliderDiv.elt, {
+                start: [filter.min, filter.max],
+                connect: true,
+                range: { 'min': filter.min, 'max': filter.max },
+                step: filter.step || 1
+            });
+
+            sliderDiv.elt.noUiSlider.on('update', function (values) {
+                const useDecimals = filter.step && filter.step < 1;
+                span.html(` ${useDecimals ? Number(values[0]).toFixed(2) : Math.round(values[0])} - 
+                           ${useDecimals ? Number(values[1]).toFixed(2) : Math.round(values[1])}`);
+            });
+
+            filterControls.push({ checkbox, slider: sliderDiv.elt, name: filter.name });
+        }
+
+        function randomizeFilters() {
+            filterControls.forEach(({ checkbox, slider, name }) => {
+                // Randomly decide whether to enable the filter
+                checkbox.checked(random() > 0.5);
+
+                // Get the range from the slider
+                const range = slider.noUiSlider.options.range;
+                const min = range.min;
+                const max = range.max;
+
+                // Find the filter configuration
+                const filterConfig = filters.find(f => f.name === name);
+                const useDecimals = filterConfig && filterConfig.step && filterConfig.step < 1;
+
+                // Generate random values within the range
+                let val1, val2;
+                if (useDecimals) {
+                    val1 = random(min, max);
+                    val2 = random(min, max);
+                } else {
+                    val1 = Math.floor(random(min, max));
+                    val2 = Math.floor(random(min, max));
+                }
+
+                // Set the slider values (ensuring lower value comes first)
+                slider.noUiSlider.set([Math.min(val1, val2), Math.max(val1, val2)]);
+            });
+        }
+
+        function handleKeyPress(event) {
+            // Use number keys 1-9 to play sounds
+            const key = parseInt(event.key);
+            if (!isNaN(key) && key > 0 && key <= currentSounds.length) {
+                togglePlay(currentSounds[key - 1].id);
+            }
+        }
+
+        async function togglePlay(playerId) {
+            const player = players.get(playerId);
+            if (!player) {
+                console.error("No player available");
+                return;
+            }
+
+            try {
+                await Tone.start();
+
+                if (player.state === "started") {
+                    await player.stop();
+                    player.isPlaying = false;
+                } else {
+                    await player.start();
+                    player.isPlaying = true;
+                }
+
+                // Update the button text based on this specific player's state
+                const buttons = selectAll('button');
+                buttons.forEach(btn => {
+                    if (btn.elt.dataset.playerId === playerId.toString()) {
+                        btn.html(player.isPlaying ? "Stop" : "Play");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error controlling playback:", error);
+                player.isPlaying = false;
+            }
+        }
+
+        const getOrCreatePlayer = async (audioUrl, id) => {
+            if (players.has(id)) {
+                return players.get(id);
+            }
+
+            try {
+                const player = new Tone.Player({
+                    url: audioUrl,
+                    autostart: false
+                }).toDestination();
+
+                // Add isPlaying property to the player
+                player.isPlaying = false;
+                players.set(id, player);
+                return player;
+            } catch (error) {
+                console.error("Error creating audio player:", error);
+                return null;
+            }
+        };
+
+        const searchFreesound = async (reverbCheckbox, singleEventCheckbox) => {
+            // Clear error and results when starting new search
+            displayError("");
+            select("#sound-info").html("");
+
+            let query = queryInput.value() || "all";
+            let activeFilters = [];
+
+            filterControls.forEach(({ checkbox, slider, name }) => {
+                if (checkbox.checked()) {
+                    const values = slider.noUiSlider.get();
+                    const useDecimals = filters.find(f => f.name === name).step && filters.find(f => f.name === name).step < 1;
+                    activeFilters.push(`${name}:[${useDecimals ? Number(values[0]).toFixed(2) : Math.round(values[0])} TO ${useDecimals ? Number(values[1]).toFixed(2) : Math.round(values[1])}]`);
+                }
+            });
+
+            // Add duration filter
+            activeFilters.push(`duration:[${minDuration} TO ${maxDuration}]`);
+
+            if (reverbCheckbox.checked()) {
+                activeFilters.push("ac_reverb:true");
+            }
+
+            if (singleEventCheckbox.checked()) {
+                activeFilters.push("ac_single_event:true");
+            }
+
+            let filterQuery = activeFilters.length ? activeFilters.join(" AND ") : "";
+
+            try {
+                await Tone.start();
+
+                freesound.textSearch(query, {
+                    filter: filterQuery,
+                    sort: "rating_desc",
+                    fields: "id,name,previews,username,url",  // Added url to fields
+                    page_size: 10
+                }, handleSearchResults, handleSearchError);
+            } catch (error) {
+                handleSearchError(error);
+            }
+        };
+
+        async function handleSearchResults(sounds) {
+            if (!sounds.results.length) {
+                displayError("No sounds found.");
+                return;
+            }
+
+            let soundList = sounds.results.slice(0, 9);
+            currentSounds = soundList;
+            let soundInfo = select("#sound-info");
+            soundInfo.html("");
+
+            // Create controls bar
+            let controlsBar = createDiv().class('controls-bar').parent(soundInfo);
+
+            // Add stop all button
+            createButton("Stop All Sounds")
+                .id("stop-all-button")
+                .mousePressed(stopAllSounds)
+                .parent(controlsBar);
+
+            // Add keyboard instructions
+            createDiv('Use number keys 1-9 to play/stop sounds')
+                .class('keyboard-instructions')
+                .parent(soundInfo);
+
+            for (let i = 0; i < soundList.length; i++) {
+                let sound = soundList[i];
+                let player = await getOrCreatePlayer(sound.previews["preview-hq-mp3"], sound.id);
+                if (player) {
+                    let soundDiv = createDiv().class("sound-info").parent(soundInfo);
+
+                    // Add keyboard shortcut indicator
+                    createElement("span", `${i + 1}`)
+                        .class("keyboard-shortcut")
+                        .parent(soundDiv);
+
+                    createElement("strong", `Sound: ${sound.name}`).parent(soundDiv);
+                    createElement("br").parent(soundDiv);
+                    createElement("strong", `By: ${sound.username}`).parent(soundDiv);
+
+                    // Add link to Freesound
+                    createA(sound.url, "View on Freesound", "_blank")
+                        .style('display', 'block')
+                        .style('margin', '5px 0')
+                        .attribute('rel', 'noopener noreferrer') // Add security attributes
+                        .parent(soundDiv);
+
+                    // Add data-player-id attribute to the button
+                    const playButton = createButton("Play")
+                        .mousePressed(() => togglePlay(sound.id))
+                        .parent(soundDiv);
+                    playButton.elt.dataset.playerId = sound.id;
+                }
+            }
+        }
+
+        async function stopAllSounds() {
+            for (let [id, player] of players) {
+                if (player.state === "started") {
+                    await player.stop();
+                    player.isPlaying = false;
+                    // Update corresponding button text
+                    const buttons = selectAll('button');
+                    buttons.forEach(btn => {
+                        if (btn.elt.dataset.playerId === id.toString()) {
+                            btn.html("Play");
+                        }
+                    });
+                }
+            }
+        }
+
+        function handleSearchError(error) {
+            displayError("Error while searching...");
+        }
+
+        function displayError(message) {
+            select("#error").html(message);
+        }
+
+        function setRandomWord() {
+            const randomIndex = Math.floor(random(soundWords.length));
+            queryInput.value(soundWords[randomIndex]);
+        }
+
+        function setRandomDuration() {
+            const min = Math.floor(random(1, 20));  // Random value between 1 and 20
+            const max = Math.floor(random(min + 1, 30));  // Random value between min+1 and 30
+            durationSlider.noUiSlider.set([min, max]);
+        }
+    </script>
+</body>
+
+</html>

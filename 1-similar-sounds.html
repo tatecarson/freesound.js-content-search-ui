@@ -1,0 +1,249 @@
+<!-- a working version of a freesound file player and random sound finder -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Freesound Example with Tone.js</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="freesound.js" defer></script>
+    <style>
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        #error {
+            color: red;
+            margin: 10px 0;
+        }
+
+        .controls {
+            margin: 15px 0;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        .sound-player {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .waveform {
+            max-width: 100%;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Random Freesound Example with Tone.js</h1>
+
+    <div class="controls">
+        <button id="new-sound-button">Find a Different Sound</button>
+        <button id="similar-sounds-button" style="display: none;">Find Similar Sounds</button>
+    </div>
+
+
+    <script>
+        const players = new Map();
+        let currentPlayer = null;
+        let displayMessage;
+        let displayError;
+
+        function setup() {
+            noCanvas();
+
+
+            freesound.setToken("Y4LBMrk6uAEG4plz6ivOY38RWV9RQ3aC6ZcHCsAi");
+
+
+            // Event listeners
+            select('#new-sound-button').mousePressed(getRandomSound);
+            displayMessage = (text, place) => {
+                select(`#${place}`).html(text);
+            };
+
+            displayError = (text) => {
+                select('#error').html(text);
+            };
+
+            // Initial sound load
+            getRandomSound();
+        }
+
+
+
+        const createTonePlayer = async (url, id) => {
+            try {
+                if (players.has(id)) {
+                    return players.get(id);
+                }
+
+                const player = new Tone.Player({
+                    url: url,
+                    autostart: false,
+                    onload: () => {
+                        console.log(`Sound ${id} loaded`);
+                    },
+                    onerror: (e) => {
+                        console.error(`Error loading sound ${id}:`, e);
+                        displayError(`Error loading sound ${id}`);
+                    }
+                }).toDestination();
+
+                players.set(id, player);
+                return player;
+            } catch (error) {
+                console.error('Error creating Tone.Player:', error);
+                displayError('Error creating audio player');
+                return null;
+            }
+        };
+
+        const playSound = async (id) => {
+            if (currentPlayer) {
+                currentPlayer.stop();
+            }
+            currentPlayer = players.get(id);
+            if (currentPlayer && currentPlayer.loaded) {
+                try {
+                    await currentPlayer.start();
+                } catch (error) {
+                    console.error('Error playing sound:', error);
+                    displayError('Error playing sound');
+                }
+            }
+        };
+
+        const stopSound = () => {
+            if (currentPlayer) {
+                currentPlayer.stop();
+            }
+        };
+
+        const getRandomSound = () => {
+            const queries = ["dog", "cat", "water", "wind", "fire", "music", "bird", "rain"];
+            const query = random(queries); // p5.js random function
+            const filter = "duration:[1.0 TO 15.0]";
+            const sort = "random";
+            const fields = "id,name,url,previews,images";
+
+            freesound.textSearch(query, { filter, sort, fields, page_size: 1 }, async (sounds) => {
+                if (sounds.results.length > 0) {
+                    const sound = sounds.results[0];
+                    console.log('Random sound:', sound);
+                    const player = await createTonePlayer(sound.previews['preview-hq-ogg'], sound.id);
+                    console.log('Player:', player);
+                    // Create container div
+                    if (select('.sound-player')) {
+                        select('.sound-player').remove();
+                    }
+
+                    const container = createDiv('');
+                    container.class('sound-player');
+                    select('body').child(container);
+
+                    // Create elements
+                    const title = createElement('h3', 'Random Sound: ' + sound.name);
+                    const urlText = createElement('strong', 'Url: ');
+                    const urlLink = createA(sound.url, sound.url, '_blank');
+                    const waveform = createImg(sound.images.waveform_l, 'Waveform');
+                    waveform.class('waveform');
+
+                    // Create buttons
+                    const playButton = createButton('Play');
+                    const stopButton = createButton('Stop');
+
+                    // Add event listeners
+                    playButton.mousePressed(() => {
+                        playSound(sound.id);
+                    });
+
+                    stopButton.mousePressed(stopSound);
+
+                    // Append elements to container
+                    container.child(title);
+                    container.child(urlText);
+                    container.child(urlLink);
+                    container.child(createElement('br'));
+                    container.child(waveform);
+                    container.child(createElement('br'));
+                    container.child(playButton);
+                    container.child(stopButton);
+
+                    // displayMessage(container.elt.outerHTML, 'sound');
+
+                    // Handle similar sounds button
+                    const similarButton = select('#similar-sounds-button');
+                    similarButton.style('display', 'block');
+                    similarButton.mousePressed(() => getSimilarSounds(sound.id));
+                } else {
+                    displayError("No sounds found.");
+                }
+            }, () => displayError("Error while searching for random sound."));
+        };
+
+        const getSimilarSounds = (soundId) => {
+            const fields = "id,name,url,previews,images";
+
+            if (select('#similar-sounds')) {
+                select('#similar-sounds').remove();
+            }
+            freesound.getSound(soundId, (sound) => {
+                sound.getSimilar((sounds) => {
+                    if (sounds.results.length > 0) {
+
+                        const similarSoundsDiv = createDiv('').id('similar-sounds');
+                        select('body').child(similarSoundsDiv);
+
+
+                        sounds.results.slice(0, 5).forEach(async similarSound => {
+                            freesound.getSound(similarSound.id, async (detailedSound) => {
+                                const previewUrl = detailedSound.previews ? detailedSound.previews['preview-hq-ogg'] : null;
+                                if (previewUrl) {
+                                    await createTonePlayer(previewUrl, detailedSound.id);
+                                }
+                                const soundPlayerDiv = createDiv('').class('sound-player');
+                                soundPlayerDiv.child(createElement('strong', detailedSound.name));
+                                soundPlayerDiv.child(createElement('br'));
+                                soundPlayerDiv.child(createA(detailedSound.url, detailedSound.url, '_blank'));
+                                soundPlayerDiv.child(createElement('br'));
+                                if (previewUrl) {
+                                    const playButton = createButton('Play');
+                                    playButton.mousePressed(() => {
+                                        playSound(detailedSound.id);
+                                    });
+                                    soundPlayerDiv.child(playButton);
+
+                                    const stopButton = createButton('Stop');
+                                    stopButton.mousePressed(() => {
+                                        stopSound();
+                                    });
+                                    soundPlayerDiv.child(stopButton);
+                                } else {
+                                    soundPlayerDiv.child(createP('No preview available'));
+                                }
+                                similarSoundsDiv.child(soundPlayerDiv);
+                            }, () => displayError("Error while retrieving similar sound details."));
+                        });
+                    } else {
+                        displayError("No similar sounds found.");
+                    }
+                }, () => displayError("Error while searching for similar sounds."));
+            }, () => displayError("Error while retrieving sound details."));
+        };
+    </script>
+</body>
+
+</html>

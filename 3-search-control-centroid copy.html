@@ -291,7 +291,8 @@
 
             const query = select('#instrument-select').value();
             const maxDuration = select('#duration-slider').value();
-            const filter = `tag:${query} duration:[1.0 TO ${maxDuration}]`;
+            // const filter = `tag:${query} duration:[1.0 TO ${maxDuration}]`;
+            const filter = `ac_brightness:[80 TO 100] ac_hardness:[50 TO 70]`
 
             try {
                 await Tone.start();

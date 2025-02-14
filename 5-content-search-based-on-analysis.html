@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freesound Content-Based Search + Tone.js</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="freesound.js" defer></script>
+
+    <style>
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        #error {
+            color: red;
+            margin: 10px 0;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        #play-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            margin: 10px 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+        }
+
+        #loading {
+            display: none;
+            margin: 10px 0;
+        }
+
+        #player-controls {
+            margin: 10px 0;
+            display: none;
+        }
+
+        .sound-info {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Freesound Content-Based Search + Tone.js</h1>
+    <div id="error"></div>
+    <div id="loading">Loading sound...</div>
+
+    <div class="controls">
+        <label for="instrument-select">Choose an Instrument:</label>
+        <select id="instrument-select">
+            <option value="violoncello">Violoncello</option>
+            <option value="piano">Piano</option>
+            <option value="guitar">Guitar</option>
+            <option value="flute">Flute</option>
+            <option value="synth">Synth</option>
+        </select>
+        <br>
+        <label for="duration-slider">Max Duration (seconds):</label>
+        <input type="range" id="duration-slider" min="1" max="30" value="15">
+        <span id="duration-value">15</span> sec
+        <br>
+        <button id="search-sounds-button">Find Sounds</button>
+    </div>
+
+    <div id="player-controls">
+        <button id="play-button">Play</button>
+    </div>
+
+    <div class="sound-info" id="sound-info"></div>
+    <div id="similar-sounds-container"></div>
+
+    <script>
+        let players = new Map();
+        let currentPlayer = null;
+        let isPlaying = false;
+        let currentSearchResults = null;
+
+        function setup() {
+            noCanvas();
+            initializeControls();
+            setupEventListeners();
+        }
+
+        function initializeControls() {
+            freesound.setToken("Y4LBMrk6uAEG4plz6ivOY38RWV9RQ3aC6ZcHCsAi");
+
+            select('#player-controls').style('display', 'none');
+            select('#loading').style('display', 'none');
+        }
+
+        function setupEventListeners() {
+            select('#search-sounds-button').mousePressed(searchFirstSound);
+            select('#play-button').mousePressed(() => togglePlay());
+            select('#duration-slider').input(() => {
+                select('#duration-value').html(select('#duration-slider').value());
+            });
+        }
+
+        /** STEP 1: First search to find one sound **/
+        async function searchFirstSound() {
+            select('#search-sounds-button').attribute('disabled', '');
+            select('#error').html('');
+            select('#loading').style('display', 'block');
+            select('#sound-info').html('');
+            select('#similar-sounds-container').html('');
+
+            const query = select('#instrument-select').value();
+            const maxDuration = select('#duration-slider').value();
+            const filter = `tag:${query} duration:[1.0 TO ${maxDuration}]`;
+
+            try {
+                await Tone.start();
+
+                freesound.textSearch(query, {
+                    filter: filter,
+                    sort: "rating_desc",
+                    fields: "id,name,previews,username,analysis",
+                    descriptors: "lowlevel.spectral_centroid,lowlevel.pitch,lowlevel.spectral_spread,lowlevel.dissonance"
+                }, handleFirstSearchResult, handleSearchError);
+            } catch (error) {
+                handleSearchError(error);
+            }
+        }
+
+        /** STEP 2: Display first sound with controls **/
+        async function handleFirstSearchResult(sounds) {
+            if (!sounds.results.length) {
+                displayError("No sounds found.");
+                return;
+            }
+
+            select('#loading').style('display', 'none');
+            select('#search-sounds-button').removeAttribute('disabled');
+
+            try {
+                const sound = sounds.results[0];
+                currentSearchResults = sound;
+
+                // Display initial sound info
+                select('#sound-info').html(`
+                    <div class="sound-info">
+                        <h3>Selected Sound:</h3>
+                        <strong>${sound.name}</strong> by ${sound.username}
+                        <button id="play-initial-${sound.id}">Play</button>
+                        <button id="stop-initial-${sound.id}">Stop</button>
+                        <button id="find-similar">Find Similar Sounds</button>
+                        <br><br>
+                        <strong>Analysis Features:</strong> 
+                        <ul>
+                            <li>Spectral Centroid: ${sound.analysis.lowlevel.spectral_centroid.mean.toFixed(2)}</li>
+                            <li>Pitch: ${sound.analysis.lowlevel.pitch.mean.toFixed(2)}</li>
+                            <li>Spectral Spread: ${sound.analysis.lowlevel.spectral_spread.mean.toFixed(2)}</li>
+                            <li>Dissonance: ${sound.analysis.lowlevel.dissonance.mean.toFixed(2)}</li>
+                        </ul>
+                    </div>
+                `);
+
+                // Set up player for initial sound
+                await getOrCreatePlayer(sound.previews["preview-hq-mp3"], sound.id);
+
+                // Add event listeners
+                select(`#play-initial-${sound.id}`).mousePressed(() => togglePlay(sound.id));
+                select(`#stop-initial-${sound.id}`).mousePressed(() => players.get(sound.id)?.stop());
+                select('#find-similar').mousePressed(() => handleFindSimilar(sound));
+            } catch (error) {
+                console.error('Error handling search results:', error);
+                displayError('Error loading sound');
+            }
+        }
+
+        /** STEP 3: Handle finding similar sounds button click **/
+        function handleFindSimilar(sound) {
+            const { spectral_centroid, pitch, spectral_spread, dissonance } = sound.analysis.lowlevel;
+            searchSimilarSounds(
+                spectral_centroid.mean,
+                pitch.mean,
+                spectral_spread.mean,
+                dissonance.mean
+            );
+        }
+
+        /** STEP 4: Content search for similar sounds **/
+        function searchSimilarSounds(centroid, pitch, spread, dissonance) {
+            select('#loading').style('display', 'block');
+            const target = [
+                `.lowlevel.spectral_centroid.mean:${centroid}`,
+                `.lowlevel.pitch.mean:${pitch}`,
+                `.lowlevel.spectral_spread.mean:${spread}`,
+                `.lowlevel.dissonance.mean:${dissonance}`
+            ].join("+");
+
+            console.log('Searching for similar sounds with target:', target);
+            freesound.contentSearch({
+                target: target,
+                page_size: 10,
+                fields: "id,name,previews,username"
+            }, displaySearchResults, handleSearchError);
+        }
+
+        /** STEP 5: Display similar sounds in separate container **/
+        function displaySearchResults(sounds) {
+            select('#loading').style('display', 'none');
+
+            if (!sounds.results.length) {
+                displayError("No similar sounds found.");
+                return;
+            }
+
+            select('#similar-sounds-container').html(`<h3>Similar Sounds:</h3>`);
+            sounds.results.forEach(async (sound) => {
+                const soundEntry = createDiv(`
+                    <div class="sound-info">
+                        <strong>${sound.name}</strong> by ${sound.username} 
+                        <button id="play-${sound.id}">Play</button>
+                        <button id="stop-${sound.id}">Stop</button>
+                    </div>
+                `);
+                soundEntry.parent(select('#similar-sounds-container'));
+
+                await getOrCreatePlayer(sound.previews["preview-hq-mp3"], sound.id);
+
+                select(`#play-${sound.id}`).mousePressed(() => togglePlay(sound.id));
+                select(`#stop-${sound.id}`).mousePressed(() => players.get(sound.id)?.stop());
+            });
+        }
+
+
+        const getOrCreatePlayer = async (audioUrl, id) => {
+            if (players.has(id)) {
+                return players.get(id);
+            }
+
+            select('#loading').style('display', 'block');
+
+            try {
+                const player = new Tone.Player({
+                    url: audioUrl,
+                    autostart: false,
+                    onload: () => {
+                        console.log(`Sound ${id} loaded successfully`);
+                        select('#player-controls').style('display', 'block');
+                        select('#loading').style('display', 'none');
+                    },
+                    onerror: (e) => {
+                        console.error(`Error loading sound ${id}:`, e);
+                        displayError(`Error loading sound ${id}`);
+                        select('#loading').style('display', 'none');
+                    }
+                }).toDestination();
+
+                players.set(id, player);
+                return player;
+            } catch (error) {
+                select('#loading').style('display', 'none');
+                console.error('Error creating Tone.Player:', error);
+                displayError('Error creating audio player');
+                return null;
+            }
+        };
+
+
+        async function togglePlay(soundId) {
+            const player = players.get(soundId);
+            if (!player) {
+                console.error('No player available for sound ID:', soundId);
+                return;
+            }
+
+            try {
+                await Tone.start();
+
+                console.log('Toggling playback on: ', player);
+                if (isPlaying) {
+                    await player.stop();
+                    isPlaying = false;
+                } else {
+                    await player.start();
+                    isPlaying = true;
+                }
+
+                select('#player-controls').style('display', 'block');
+                select('#play-button').html(isPlaying ? 'Stop' : 'Play');
+
+            } catch (error) {
+                console.error('Error controlling playback:', error);
+                displayError('Error controlling playback');
+                isPlaying = false;
+                select('#play-button').html('Play');
+            }
+        }
+        function displayError(message) {
+            select('#error').html(`<div class="error">${message}</div>`);
+        }
+
+        function handleSearchError(error) {
+            console.error('Error searching sounds:', error);
+            displayError('Error loading sound');
+        }
+    </script>
+</body>
+
+</html>

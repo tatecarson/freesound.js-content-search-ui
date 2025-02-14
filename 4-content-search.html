@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Freesound Content Search + Tone.js</title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="freesound.js" defer></script>
+
+    <style>
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        #error {
+            color: red;
+            margin: 10px 0;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        #play-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            margin: 10px 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: none;
+        }
+
+        #loading {
+            display: none;
+            margin: 10px 0;
+        }
+
+        #player-controls {
+            margin: 10px 0;
+            display: none;
+        }
+
+        .sound-info {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+
+        h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        div {
+            margin-bottom: 5px;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            height: 10px;
+            border-radius: 5px;
+            background: #ddd;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+
+        .controls-container {
+            margin: 20px 0;
+        }
+
+        .controls-container div {
+            margin: 15px 0;
+        }
+
+        .controls-container h3 {
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Freesound Content-Based Search + Tone.js</h1>
+    <div id="error"></div>
+    <div id="loading">Loading sound...</div>
+
+    <div class="controls">
+        <button id="search-sounds-button">Find Sounds</button>
+        
+   
+        <div id="target-container">
+            <h3>Target Parameters</h3>
+        </div>
+        <div id="filter-container">
+            <h3>Filter Parameters</h3>
+        </div>
+    </div>
+
+    <div id="player-controls">
+        <button id="play-button">Play</button>
+    </div>
+
+    <div class="sound-info" id="sound-info"></div>
+
+    <script>
+        let players = new Map();
+        let currentPlayer = null;
+        let isPlaying = false;
+        let pitchSalienceSlider, pitchMeanSlider, pitchVarSlider, lengthSlider, centroidSlider, complexitySlider;
+        let sliderLabels = {};
+
+        function setup() {
+            noCanvas();
+            initializeControls();
+            setupEventListeners();
+        }
+
+        function initializeControls() {
+            freesound.setToken("Y4LBMrk6uAEG4plz6ivOY38RWV9RQ3aC6ZcHCsAi");
+
+            // Create a container for all controls
+            const controlsContainer = select('.controls-container');
+
+            const targetContainer = select('#target-container');
+            const filterContainer = select('#filter-container');
+
+            const pitchSalienceContainer = createDiv('').parent(targetContainer);
+            sliderLabels.pitchSalience = createDiv('Pitch Salience Mean: 0.5');
+            pitchSalienceSlider = createSlider(0, 1, 0.5, 0.1);
+            pitchSalienceSlider.style('width', '200px');
+            pitchSalienceSlider.parent(pitchSalienceContainer);
+            sliderLabels.pitchSalience.parent(pitchSalienceContainer);
+            pitchSalienceSlider.input(() => {
+                sliderLabels.pitchSalience.html('Pitch Salience Mean: ' + pitchSalienceSlider.value());
+            });
+
+            const pitchMeanContainer = createDiv('').parent(targetContainer);
+            sliderLabels.pitchMean = createDiv('Pitch Mean: 500');
+            pitchMeanSlider = createSlider(100, 1000, 500, 10);
+            pitchMeanSlider.style('width', '200px');
+            pitchMeanSlider.parent(pitchMeanContainer);
+            sliderLabels.pitchMean.parent(pitchMeanContainer);
+            pitchMeanSlider.input(() => {
+                sliderLabels.pitchMean.html('Pitch Mean: ' + pitchMeanSlider.value());
+            });
+
+
+            const spectralCentroidContainer = createDiv('').parent(targetContainer);
+            sliderLabels.centroid = createDiv('Spectral Centroid Mean: 1500');
+            centroidSlider = createSlider(300, 5000, 1500, 50);
+            centroidSlider.style('width', '200px');
+            centroidSlider.parent(spectralCentroidContainer);
+            sliderLabels.centroid.parent(spectralCentroidContainer);
+            centroidSlider.input(() => {
+                sliderLabels.centroid.html('Spectral Centroid Mean: ' + centroidSlider.value());
+            });
+
+            const spectralComplexityContainer = createDiv('').parent(targetContainer);
+            sliderLabels.bandwidth = createDiv('Spectral Bandwidth Mean: 2000');
+            complexitySlider = createSlider(100, 4000, 2000, 50);
+            complexitySlider.style('width', '200px');
+            complexitySlider.parent(spectralComplexityContainer);
+            sliderLabels.bandwidth.parent(spectralComplexityContainer);
+            complexitySlider.input(() => {
+                sliderLabels.bandwidth.html('Spectral Bandwidth Mean: ' + complexitySlider.value());
+            });
+
+
+            const pitchVarContainer = createDiv('').parent(filterContainer);
+            sliderLabels.pitchVar = createDiv('Pitch Variance Max: 20');
+            pitchVarSlider = createSlider(0, 50, 20, 1);
+            pitchVarSlider.style('width', '200px');
+            pitchVarSlider.parent(pitchVarContainer);
+            sliderLabels.pitchVar.parent(pitchVarContainer);
+            pitchVarSlider.input(() => {
+                sliderLabels.pitchVar.html('Pitch Variance Max: ' + pitchVarSlider.value());
+            });
+
+            const lengthContainer = createDiv('').parent(filterContainer);
+            sliderLabels.length = createDiv('Max Length (seconds): 10');
+            lengthSlider = createSlider(1, 30, 10, 1);
+            lengthSlider.style('width', '200px');
+            lengthSlider.parent(lengthContainer);
+            sliderLabels.length.parent(lengthContainer);
+            lengthSlider.input(() => {
+                sliderLabels.length.html('Max Length (seconds): ' + lengthSlider.value());
+            });
+
+            select('#player-controls').style('display', 'none');
+            select('#loading').style('display', 'none');
+
+
+        }
+
+        function setupEventListeners() {
+            select('#search-sounds-button').mousePressed(searchFreesound);
+            select('#play-button').mousePressed(() => togglePlay());
+        }
+
+        const searchFreesound = async () => {
+            select('#search-sounds-button').attribute('disabled', '');
+            select('#error').html('');
+
+            // Properly format the target parameter
+            const target = [
+                `.lowlevel.pitch_salience.mean:${pitchSalienceSlider.value()}`,
+                `.lowlevel.pitch.mean:${pitchMeanSlider.value()}`,
+                `.lowlevel.spectral_centroid.mean:${centroidSlider.value()}`,
+                `.lowlevel.spectral_complexity.mean:${complexitySlider.value()}`
+            ].join("+");  // Use "+" instead of spaces
+
+            // Properly format the filter query
+            const filter = [
+                `.lowlevel.pitch.var:[* TO ${pitchVarSlider.value()}]`,
+                `.lowlevel.mfcc.mean:[-20 TO 20]`,
+                `.metadata.audio_properties.length:[1 TO ${lengthSlider.value()}]`
+            ].join(" AND "); // Properly formatted filter query
+
+            const pageSize = 10;
+            const randomPage = Math.floor(Math.random() * 5) + 1;  // Introduce pagination
+
+            const fields = "id,name,url,analysis,username,previews";
+
+            try {
+                await Tone.start();
+
+                freesound.contentSearch({
+                    target: target,
+                    filter: filter,
+                    page_size: pageSize,
+                    page: randomPage, // Fetch random pages
+                    fields: fields
+                },
+                    handleSearchResults,
+                    handleSearchError);
+            } catch (error) {
+                handleSearchError(error);
+            }
+        };
+
+
+        async function handleSearchResults(sounds) {
+            if (!sounds.results.length) {
+                displayError("No sounds found.");
+                return;
+            }
+
+            select('#sound-info').html(`<h3>Select a Sound:</h3>`);
+
+            // Clear existing sound entries
+            select('#sound-info').html('');
+
+            sounds.results.forEach(async (sound) => {
+                const soundEntry = createDiv(`
+            <div class="sound-info">
+                <strong>${sound.name}</strong> by ${sound.username} 
+                <button id="play-${sound.id}">Play</button>
+                <button id="stop-${sound.id}">Stop</button>
+            </div>
+        `);
+
+                soundEntry.parent(select('#sound-info'));
+
+                // Create the player when the sound entry is created
+                await getOrCreatePlayer(sound.previews["preview-hq-mp3"], sound.id);
+
+                select(`#play-${sound.id}`).mousePressed(() => {
+                    togglePlay(sound.id);
+                });
+
+                select(`#stop-${sound.id}`).mousePressed(() => {
+                    const player = players.get(sound.id);
+                    if (player) {
+                        player.stop();
+                        isPlaying = false;
+                        select('#play-button').html('Play');
+                    }
+                });
+            });
+
+            select('#search-sounds-button').removeAttribute('disabled');
+        }
+
+        function handleSearchError(error) {
+            console.error('Search error:', error);
+            displayError("Error while searching...");
+            select('#search-sounds-button').removeAttribute('disabled');
+        }
+
+        function updateSoundInfo(sound) {
+            select('#sound-info').html(`
+                <strong>Sound:</strong> ${sound.name}<br>
+                <strong>By:</strong> ${sound.username}
+            `);
+        }
+
+        const getOrCreatePlayer = async (audioUrl, id) => {
+            if (players.has(id)) {
+                return players.get(id);
+            }
+
+            select('#loading').style('display', 'block');
+
+            try {
+                const player = new Tone.Player({
+                    url: audioUrl,
+                    autostart: false,
+                    onload: () => {
+                        console.log(`Sound ${id} loaded successfully`);
+                        select('#player-controls').style('display', 'block');
+                        select('#loading').style('display', 'none');
+                    },
+                    onerror: (e) => {
+                        console.error(`Error loading sound ${id}:`, e);
+                        displayError(`Error loading sound ${id}`);
+                        select('#loading').style('display', 'none');
+                    }
+                }).toDestination();
+
+                players.set(id, player);
+                return player;
+            } catch (error) {
+                select('#loading').style('display', 'none');
+                console.error('Error creating Tone.Player:', error);
+                displayError('Error creating audio player');
+                return null;
+            }
+        };
+
+        async function togglePlay(soundId) {
+            const player = players.get(soundId);
+            if (!player) {
+                console.error('No player available for sound ID:', soundId);
+                return;
+            }
+
+            try {
+                await Tone.start();
+
+                console.log('Toggling playback on: ', player);
+                if (isPlaying) {
+                    await player.stop();
+                    isPlaying = false;
+                } else {
+                    await player.start();
+                    isPlaying = true;
+                }
+
+                select('#player-controls').style('display', 'block');
+                select('#play-button').html(isPlaying ? 'Stop' : 'Play');
+
+            } catch (error) {
+                console.error('Error controlling playback:', error);
+                displayError('Error controlling playback');
+                isPlaying = false;
+                select('#play-button').html('Play');
+            }
+        }
+
+        function displayError(message) {
+            select('#error').html(`<div class="error">${message}</div>`);
+        }
+    </script>
+</body>
+
+</html>
