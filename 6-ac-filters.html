@@ -188,6 +188,15 @@
             margin: 10px 0;
             font-weight: bold;
         }
+
+        #next-page-button {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            margin: 0 0 10px 0;
+            padding: 10px 20px;
+        }
     </style>
 </head>
 
@@ -207,6 +216,11 @@
         let minDuration = 1;
         let maxDuration = 30;
         let currentSounds = [];
+        let currentPage = 1;
+        let lastQuery = '';
+        let lastFilterQuery = '';
+        let reverbCheckboxRef;
+        let singleEventCheckboxRef;
 
         const filters = [
             // Content-based filters
@@ -294,9 +308,9 @@
             createElement("h4", "Additional Properties").parent(controlsDiv);
             let booleanFilters = createDiv().class("boolean-filters").parent(controlsDiv);
             let reverbDiv = createDiv().class("slider-container").parent(booleanFilters);
-            let reverbCheckbox = createCheckbox("Reverb", false).parent(reverbDiv);
+            reverbCheckboxRef = createCheckbox("Reverb", false).parent(reverbDiv);
             let singleEventDiv = createDiv().class("slider-container").parent(booleanFilters);
-            let singleEventCheckbox = createCheckbox("Single Event", false).parent(singleEventDiv);
+            singleEventCheckboxRef = createCheckbox("Single Event", false).parent(singleEventDiv);
 
             // Create a container for search button and error
             let searchContainer = createDiv().parent(controlsDiv);
@@ -304,7 +318,7 @@
             // Search button
             createButton("Find Sounds")
                 .id("search-button")
-                .mousePressed(() => searchFreesound(reverbCheckbox, singleEventCheckbox))
+                .mousePressed(() => searchFreesound(reverbCheckboxRef, singleEventCheckboxRef))
                 .parent(searchContainer);
 
             // Add error div after search button
@@ -426,10 +440,12 @@
             }
         };
 
-        const searchFreesound = async (reverbCheckbox, singleEventCheckbox) => {
-            // Clear error and results when starting new search
-            displayError("");
-            select("#sound-info").html("");
+        const searchFreesound = async (reverbCheckbox, singleEventCheckbox, page = 1) => {
+            if (page === 1) {
+                // Only clear results on new search, not when loading more
+                displayError("");
+                select("#sound-info").html("");
+            }
 
             let query = queryInput.value() || "all";
             let activeFilters = [];
@@ -455,14 +471,20 @@
 
             let filterQuery = activeFilters.length ? activeFilters.join(" AND ") : "";
 
+            // Store current search parameters
+            lastQuery = query;
+            lastFilterQuery = filterQuery;
+            currentPage = page;
+
             try {
                 await Tone.start();
 
                 freesound.textSearch(query, {
                     filter: filterQuery,
                     sort: "rating_desc",
-                    fields: "id,name,previews,username,url",  // Added url to fields
-                    page_size: 10
+                    fields: "id,name,previews,username,url",
+                    page: page,
+                    page_size: 9
                 }, handleSearchResults, handleSearchError);
             } catch (error) {
                 handleSearchError(error);
@@ -475,10 +497,10 @@
                 return;
             }
 
-            let soundList = sounds.results.slice(0, 9);
+            let soundList = sounds.results;
             currentSounds = soundList;
             let soundInfo = select("#sound-info");
-            soundInfo.html("");
+            soundInfo.html(""); // Always clear results for new page
 
             // Create controls bar
             let controlsBar = createDiv().class('controls-bar').parent(soundInfo);
@@ -489,7 +511,15 @@
                 .mousePressed(stopAllSounds)
                 .parent(controlsBar);
 
-            // Add keyboard instructions
+            // Add next page button if there are more results
+            if (sounds.next) {
+                createButton("Next 9 Sounds")
+                    .id("next-page-button")
+                    .mousePressed(() => searchFreesound(reverbCheckboxRef, singleEventCheckboxRef, currentPage + 1))
+                    .parent(controlsBar);
+            }
+
+            // Add keyboard instructions on every page
             createDiv('Use number keys 1-9 to play/stop sounds')
                 .class('keyboard-instructions')
                 .parent(soundInfo);
