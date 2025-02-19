@@ -134,7 +134,7 @@
                     filter: filter,
                     sort: "rating_desc",
                     fields: "id,name,previews,username,analysis",
-                    descriptors: "lowlevel.spectral_centroid,lowlevel.pitch,lowlevel.spectral_spread,lowlevel.dissonance"
+                    descriptors: "lowlevel.spectral_centroid,lowlevel.pitch,lowlevel.spectral_spread,lowlevel.dissonance,lowlevel.mfcc"
                 }, handleFirstSearchResult, handleSearchError);
             } catch (error) {
                 handleSearchError(error);
@@ -171,6 +171,9 @@
                             <li>Spectral Spread: ${sound.analysis.lowlevel.spectral_spread.mean.toFixed(2)}</li>
                             <li>Dissonance: ${sound.analysis.lowlevel.dissonance.mean.toFixed(2)}</li>
                         </ul>
+                        <ul>
+                            <li>MFCC: ${sound.analysis.lowlevel.mfcc.mean}</li>
+                        </ul>
                     </div>
                 `);
 
@@ -189,30 +192,33 @@
 
         /** STEP 3: Handle finding similar sounds button click **/
         function handleFindSimilar(sound) {
-            const { spectral_centroid, pitch, spectral_spread, dissonance } = sound.analysis.lowlevel;
+            const { spectral_centroid, pitch, spectral_spread, dissonance, mfcc } = sound.analysis.lowlevel;
             searchSimilarSounds(
                 spectral_centroid.mean,
                 pitch.mean,
                 spectral_spread.mean,
-                dissonance.mean
+                dissonance.mean,
+                mfcc.mean
             );
         }
 
         /** STEP 4: Content search for similar sounds **/
-        function searchSimilarSounds(centroid, pitch, spread, dissonance) {
+        function searchSimilarSounds(centroid, pitch, spread, dissonance, mfcc) {
             select('#loading').style('display', 'block');
             const target = [
                 `.lowlevel.spectral_centroid.mean:${centroid}`,
                 `.lowlevel.pitch.mean:${pitch}`,
                 `.lowlevel.spectral_spread.mean:${spread}`,
-                `.lowlevel.dissonance.mean:${dissonance}`
+                `.lowlevel.dissonance.mean:${dissonance}`,
+                `.lowlevel.mfcc.mean:${mfcc}`
             ].join("+");
 
             console.log('Searching for similar sounds with target:', target);
             freesound.contentSearch({
                 target: target,
                 page_size: 10,
-                fields: "id,name,previews,username"
+                fields: "id,name,previews,username,analysis",
+                descriptors: "lowlevel.spectral_centroid,lowlevel.pitch,lowlevel.spectral_spread,lowlevel.dissonance,lowlevel.mfcc"
             }, displaySearchResults, handleSearchError);
         }
 
@@ -225,15 +231,31 @@
                 return;
             }
 
-            select('#similar-sounds-container').html(`<h3>Similar Sounds:</h3>`);
-            sounds.results.forEach(async (sound) => {
+            // Compute similarity scores for sorting
+            const sortedSounds = sounds.results.map((sound) => {
+                console.log(sound)
+                if (!sound.analysis || !sound.analysis.lowlevel) {
+                    return {
+                        ...sound,
+                        similarityScore: Infinity // Assign a high score if analysis data is missing
+                    };
+                }
+                return {
+                    ...sound,
+                    similarityScore: computeSimilarityScore(currentSearchResults.analysis.lowlevel, sound.analysis.lowlevel)
+                };
+            }).sort((a, b) => a.similarityScore - b.similarityScore); // Lower score = better match
+
+            select('#similar-sounds-container').html(`<h3>Similar Sounds (Sorted by Relevance):</h3>`);
+            sortedSounds.forEach(async (sound) => {
                 const soundEntry = createDiv(`
-                    <div class="sound-info">
-                        <strong>${sound.name}</strong> by ${sound.username} 
-                        <button id="play-${sound.id}">Play</button>
-                        <button id="stop-${sound.id}">Stop</button>
-                    </div>
-                `);
+            <div class="sound-info">
+                <strong>${sound.name}</strong> by ${sound.username} 
+                <button id="play-${sound.id}">Play</button>
+                <button id="stop-${sound.id}">Stop</button>
+                <p>Similarity Score: ${sound.similarityScore.toFixed(2)}</p>
+            </div>
+        `);
                 soundEntry.parent(select('#similar-sounds-container'));
 
                 await getOrCreatePlayer(sound.previews["preview-hq-mp3"], sound.id);
@@ -241,6 +263,37 @@
                 select(`#play-${sound.id}`).mousePressed(() => togglePlay(sound.id));
                 select(`#stop-${sound.id}`).mousePressed(() => players.get(sound.id)?.stop());
             });
+        }
+
+
+        function computeSimilarityScore(targetSound, candidateSound) {
+            let weights = {
+                spectral_centroid: 0.25,
+                pitch: 0.3,
+                spectral_spread: 0.2,
+                dissonance: 0.15,
+                mfcc: 0.1
+            };
+
+            let score = 0;
+
+            console.log('Target Sound:', targetSound);
+            console.log('Candidate Sound:', candidateSound);
+
+            const spectralCentroidDiff = Math.abs(targetSound.spectral_centroid.mean - candidateSound.spectral_centroid.mean);
+            const pitchDiff = Math.abs(targetSound.pitch.mean - candidateSound.pitch.mean);
+            const spectralSpreadDiff = Math.abs(targetSound.spectral_spread.mean - candidateSound.spectral_spread.mean);
+            const dissonanceDiff = Math.abs(targetSound.dissonance.mean - candidateSound.dissonance.mean);
+            const mfccDiff = Math.abs(targetSound.mfcc.mean[0] - candidateSound.mfcc.mean[0]);
+
+            score += weights.spectral_centroid * spectralCentroidDiff;
+            score += weights.pitch * pitchDiff;
+            score += weights.spectral_spread * spectralSpreadDiff;
+            score += weights.dissonance * dissonanceDiff;
+            score += weights.mfcc * mfccDiff;
+
+            console.log('Computed similarity score:', score);
+            return score;
         }
 
 
